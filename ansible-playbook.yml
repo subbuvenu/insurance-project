@@ -23,4 +23,92 @@
       #     update_cache: yes
       # - name: Import Google Chrome GPG key
       #   ansible.builtin.apt_key:
-      #     url:
+      #     url: https://dl.google.com/linux/linux_signing_key.pub
+      #     state: present
+
+    - name: Get Chrome Browser Version
+      ansible.builtin.command: google-chrome --product-version
+      register: chrome_version_output
+      changed_when: false # This task just gets info, doesn't change anything
+
+    - name: Extract Chrome Major Version
+      ansible.builtin.set_fact:
+        chrome_major_version: "{{ chrome_version_output.stdout | regex_replace('\\..*', '') }}"
+
+    - name: Debug Chrome Major Version (Optional)
+      ansible.builtin.debug:
+        msg: "Detected Chrome Major Version: {{ chrome_major_version }}"
+
+    - name: Download ChromeDriver for detected Chrome version
+      ansible.builtin.get_url:
+        url: "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/{{ chrome_major_version }}.0.{{ chrome_major_version * 100 }}.0/linux64/chromedriver-linux64.zip" # Example URL, adjust if needed
+        dest: "/tmp/chromedriver-linux64.zip"
+        mode: '0644' # Ensure proper permissions for the downloaded file
+      # Note: The exact URL for ChromeDriver can vary. It's best to check
+      # https://googlechromelabs.github.io/chrome-for-testing/ for the most accurate URL for your Chrome version.
+      # The URL above is a common pattern for recent versions.
+
+    - name: Unarchive ChromeDriver
+      ansible.builtin.unarchive:
+        src: "/tmp/chromedriver-linux64.zip"
+        dest: "/tmp/"
+        remote_src: yes # Source is on the remote machine
+
+    - name: Move ChromeDriver to /usr/bin and set permissions
+      ansible.builtin.copy:
+        src: "/tmp/chromedriver-linux64/chromedriver"
+        dest: "/usr/bin/chromedriver"
+        mode: '0755' # Make it executable
+        remote_src: yes
+
+    - name: Verify ChromeDriver installation (Optional)
+      ansible.builtin.command: chromedriver --version
+      register: chromedriver_check
+      changed_when: false
+    - ansible.builtin.debug:
+        msg: "ChromeDriver version: {{ chromedriver_check.stdout }}"
+
+
+    - name: Ensure Docker is installed (using apt module for idempotence)
+      ansible.builtin.apt:
+        name: docker.io
+        state: present
+
+    - name: Ensure Docker service is running and enabled (using systemd module)
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Stop existing Docker Container (if running)
+      ansible.builtin.shell: docker stop insure-me-container || true
+      args:
+        warn: false # Suppress warning for non-zero exit code if container doesn't exist
+
+    - name: Remove stopped Docker Container (if exists)
+      ansible.builtin.shell: docker rm insure-me-container || true
+      args:
+        warn: false
+
+    - name: Deploy Docker Container
+      ansible.builtin.command: docker run -d --name insure-me-container -p 8084:8081 shubhamkushwah123/insure-me:{{ lookup('env', 'BUILD_NUMBER') | default('3.0') }}
+      # Using -d for detached mode.
+      # Using --name for easy management.
+      # Using Jenkins BUILD_NUMBER for the tag, falling back to 3.0 if not found (e.g., local run).
+      # Ensure port 8081 is what your Spring Boot application inside the Docker container is listening on.
+      # Port 8084 is the host port accessible from outside.
+
+    - name: Configure Uncomplicated Firewall (UFW) to allow port 8084
+      community.general.ufw:
+        rule: allow
+        port: '8084'
+        proto: tcp
+        state: enabled
+      # Ensure UFW is installed and running, or adjust for other firewalls like firewalld.
+
+    - name: Ensure UFW is enabled and started
+      ansible.builtin.systemd:
+        name: ufw
+        state: started
+        enabled: yes
+      when: ansible_facts.distribution == "Ubuntu" # Only for Ubuntu, adjust for other distros
