@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: insurance-deployment
+  labels:
+    app: insurance
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: insurance
+  template:
+    metadata:
+      labels:
+        app: insurance
+    spec:
+      containers:
+      - name: insurance-container
+        image: subbuvenu/insurance-project:latest
+        ports:
+        - containerPort: 8082
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: insurance-nodeport-svc
+  labels:
+    app: insurance
+spec:
+  selector:
+    app: insurance
+  type: NodePort
+  ports:
+  - nodePort: 31036   # use an available NodePort in the range 30000–32767
+    port: 8082
+    targetPort: 8082
